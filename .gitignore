@@ -79,3 +79,10 @@ docs/docusaurus/website/node_modules
 
 # cli logs
 **/logs
+
+# clangd
+*.cache/
+*.clangd/
+
+# vscode
+.vscode/settings.json
