@@ -89,6 +89,12 @@ void RestorePlatformFactorySettings(void);
  */
 const HAPAccessory* AppGetAccessoryInfo();
 
+void AppInitialize(HAPAccessoryServerOptions *hapAccessoryServerOptions,
+                   HAPPlatform *hapPlatform,
+                   HAPAccessoryServerCallbacks *hapAccessoryServerCallbacks);
+
+void AppDeinitialize();
+
 #if __has_feature(nullability)
 #pragma clang assume_nonnull end
 #endif

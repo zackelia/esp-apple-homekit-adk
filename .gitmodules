@@ -1,3 +1,6 @@
 [submodule "homekit_adk"]
-	path = homekit_adk
+	path = lib/homekit_adk
 	url = https://github.com/apple/HomeKitADK
+[submodule "examples/WS2812B/lib/FastLED-idf"]
+	path = lib/FastLED-idf
+	url = https://github.com/bbulkow/FastLED-idf

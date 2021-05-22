@@ -25,6 +25,9 @@
 //
 //   6. Callbacks that notify the server in case their associated value has changed.
 
+#define FASTLED_INTERNAL // Disable "No hardware SPI pins defined.  All SPI
+                         // access will default to bitbanged output" message
+#include "FastLED.h"
 #include "HAP.h"
 
 #include "App.h"
