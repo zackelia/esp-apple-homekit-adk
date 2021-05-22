@@ -89,9 +89,10 @@ void RestorePlatformFactorySettings(void);
  */
 const HAPAccessory* AppGetAccessoryInfo();
 
-void AppInitialize(HAPAccessoryServerOptions *hapAccessoryServerOptions,
-                   HAPPlatform *hapPlatform,
-                   HAPAccessoryServerCallbacks *hapAccessoryServerCallbacks);
+void AppInitialize(
+        HAPAccessoryServerOptions* hapAccessoryServerOptions,
+        HAPPlatform* hapPlatform,
+        HAPAccessoryServerCallbacks* hapAccessoryServerCallbacks);
 
 void AppDeinitialize();
 

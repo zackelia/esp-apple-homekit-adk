@@ -84,41 +84,43 @@ extern const HAPAccessory* AppGetAccessoryInfo();
  */
 static void InitializePlatform() {
     // Key-value store.
-    HAPPlatformKeyValueStoreCreate(&platform.keyValueStore, &(const HAPPlatformKeyValueStoreOptions) {
-        .part_name = "nvs",
-        .namespace_prefix = "hap",
-        .read_only = false
-    });
+    HAPPlatformKeyValueStoreCreate(
+            &platform.keyValueStore,
+            &(const HAPPlatformKeyValueStoreOptions) {
+                    .part_name = "nvs", .namespace_prefix = "hap", .read_only = false });
     platform.hapPlatform.keyValueStore = &platform.keyValueStore;
 
-    HAPPlatformKeyValueStoreCreate(&platform.factoryKeyValueStore, &(const HAPPlatformKeyValueStoreOptions) {
-        .part_name = CONFIG_EXAMPLE_FACTORY_PARTITION_NAME,
-        .namespace_prefix = "hap",
-        .read_only = true
-    });
+    HAPPlatformKeyValueStoreCreate(
+            &platform.factoryKeyValueStore,
+            &(const HAPPlatformKeyValueStoreOptions) {
+                    .part_name = CONFIG_EXAMPLE_FACTORY_PARTITION_NAME, .namespace_prefix = "hap", .read_only = true });
 
     // Accessory setup manager. Depends on key-value store.
     static HAPPlatformAccessorySetup accessorySetup;
     HAPPlatformAccessorySetupCreate(
-            &accessorySetup, &(const HAPPlatformAccessorySetupOptions) { .keyValueStore = &platform.factoryKeyValueStore });
+            &accessorySetup,
+            &(const HAPPlatformAccessorySetupOptions) { .keyValueStore = &platform.factoryKeyValueStore });
     platform.hapPlatform.accessorySetup = &accessorySetup;
-    
+
     // Initialise Wi-Fi
     app_wifi_init();
 
 #if IP
     // TCP stream manager.
-    HAPPlatformTCPStreamManagerCreate(&platform.tcpStreamManager, &(const HAPPlatformTCPStreamManagerOptions) {
-        /* Listen on all available network interfaces. */
-        .port = 0 /* Listen on unused port number from the ephemeral port range. */,
-        .maxConcurrentTCPStreams = 9
-    });
+    HAPPlatformTCPStreamManagerCreate(
+            &platform.tcpStreamManager,
+            &(const HAPPlatformTCPStreamManagerOptions) {
+                    /* Listen on all available network interfaces. */
+                    .port = 0 /* Listen on unused port number from the ephemeral port range. */,
+                    .maxConcurrentTCPStreams = 9 });
 
     // Service discovery.
     static HAPPlatformServiceDiscovery serviceDiscovery;
-    HAPPlatformServiceDiscoveryCreate(&serviceDiscovery, &(const HAPPlatformServiceDiscoveryOptions) {
-        0, /* Register services on all available network interfaces. */
-    });
+    HAPPlatformServiceDiscoveryCreate(
+            &serviceDiscovery,
+            &(const HAPPlatformServiceDiscoveryOptions) {
+                    0, /* Register services on all available network interfaces. */
+            });
     platform.hapPlatform.ip.serviceDiscovery = &serviceDiscovery;
 #endif
 
@@ -154,7 +156,7 @@ static void InitializePlatform() {
     platform.hapPlatform.authentication.mfiTokenAuth =
             HAPPlatformMFiTokenAuthIsProvisioned(&platform.mfiTokenAuth) ? &platform.mfiTokenAuth : NULL;
 
-   platform.hapAccessoryServerCallbacks.handleUpdatedState = HandleUpdatedState;
+    platform.hapAccessoryServerCallbacks.handleUpdatedState = HandleUpdatedState;
 }
 
 /**
@@ -299,8 +301,7 @@ static void InitializeBLE() {
 }
 #endif
 
-void main_task()
-{
+void main_task() {
     HAPAssert(HAPGetCompatibilityVersion() == HAP_COMPATIBILITY_VERSION);
 
     // Initialize global platform objects.
@@ -344,7 +345,6 @@ void main_task()
     DeinitializePlatform();
 }
 
-void app_main()
-{
+void app_main() {
     xTaskCreate(main_task, "main_task", 6 * 1024, NULL, 6, NULL);
 }
