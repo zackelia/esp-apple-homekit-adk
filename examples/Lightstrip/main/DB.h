@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // See [CONTRIBUTORS.md] for the list of HomeKit ADK project authors.
 
-// Basic light bulb database example. This header file, and the corresponding DB.c implementation in the ADK, is
+// Basic lightstrip database example. This header file, and the corresponding DB.c implementation in the ADK, is
 // platform-independent.
 
 #ifndef DB_H
