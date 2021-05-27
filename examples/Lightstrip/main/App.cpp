@@ -25,6 +25,17 @@
 //
 //   6. Callbacks that notify the server in case their associated value has changed.
 
+#define VOLTS       5
+#define MILLIAMPS   3300
+#define LED_PIN     12 // TODO: Why does naming this DATA_PIN cause compile errors?
+#define NUM_LEDS    84
+#define LED_TYPE    WS2812B
+#define COLOR_ORDER GRB
+
+#define HUE_DEFAULT        125 // TODO: Use Kconfig.projbuild for these
+#define SATURATION_DEFAULT 204
+#define BRIGHTNESS_DEFAULT 120
+
 #define FASTLED_INTERNAL // Disable "No hardware SPI pins defined.  All SPI
                          // access will default to bitbanged output" message
 #include "FastLED.h"
@@ -51,17 +62,27 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
+ * Lightstrip information.
+ */
+typedef struct {
+    bool on;
+    CHSV led;
+} lightstrip;
+
+/**
  * Global accessory configuration.
  */
 typedef struct {
     struct {
-        bool lightBulbOn;
+        lightstrip current;
     } state;
     HAPAccessoryServerRef* server;
     HAPPlatformKeyValueStoreRef keyValueStore;
 } AccessoryConfiguration;
 
 static AccessoryConfiguration accessoryConfiguration;
+
+CRGB leds[NUM_LEDS];
 
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -95,6 +116,9 @@ static void LoadAccessoryState(void) {
             HAPLogError(&kHAPLog_Default, "Unexpected app state found in key-value store. Resetting to default.");
         }
         HAPRawBufferZero(&accessoryConfiguration.state, sizeof accessoryConfiguration.state);
+
+        // Set defaults
+        accessoryConfiguration.state.current.led = CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT);
     }
 }
 
@@ -156,7 +180,7 @@ HAPError HandleLightBulbOnRead(
         const HAPBoolCharacteristicReadRequest* request HAP_UNUSED,
         bool* value,
         void* _Nullable context HAP_UNUSED) {
-    *value = accessoryConfiguration.state.lightBulbOn;
+    *value = accessoryConfiguration.state.current.on;
     HAPLogInfo(&kHAPLog_Default, "%s: %s", __func__, *value ? "true" : "false");
 
     return kHAPError_None;
@@ -169,11 +193,129 @@ HAPError HandleLightBulbOnWrite(
         bool value,
         void* _Nullable context HAP_UNUSED) {
     HAPLogInfo(&kHAPLog_Default, "%s: %s", __func__, value ? "true" : "false");
-    if (accessoryConfiguration.state.lightBulbOn != value) {
-        accessoryConfiguration.state.lightBulbOn = value;
+    if (accessoryConfiguration.state.current.on != value) {
+        accessoryConfiguration.state.current.on = value;
+
+        if (value) {
+            FastLED.setBrightness(accessoryConfiguration.state.current.led.value);
+        } else {
+            FastLED.setBrightness(0);
+        }
+        FastLED.show();
 
         SaveAccessoryState();
+        HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
+    }
 
+    return kHAPError_None;
+}
+
+HAP_RESULT_USE_CHECK
+HAPError HandleLightBulbHueRead(
+        HAPAccessoryServerRef* server HAP_UNUSED,
+        const HAPFloatCharacteristicReadRequest* request HAP_UNUSED,
+        float* value,
+        void* _Nullable context HAP_UNUSED) {
+    // HomeKit value is 0-360, FastLED is 0-255
+    *value = (accessoryConfiguration.state.current.led.hue * 360) / 255;
+    HAPLogInfo(&kHAPLog_Default, "%s: %g", __func__, *value);
+
+    return kHAPError_None;
+}
+
+HAP_RESULT_USE_CHECK
+HAPError HandleLightBulbHueWrite(
+        HAPAccessoryServerRef* server,
+        const HAPFloatCharacteristicWriteRequest* request,
+        float value,
+        void* _Nullable context HAP_UNUSED) {
+    HAPLogInfo(&kHAPLog_Default, "%s: %g", __func__, value);
+
+    // HomeKit value is 0-360, FastLED is 0-255
+    value = (value * 255) / 360;
+
+    if (accessoryConfiguration.state.current.led.hue != value) {
+        accessoryConfiguration.state.current.led.hue = value;
+
+        fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
+        FastLED.show();
+
+        SaveAccessoryState();
+        HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
+    }
+
+    return kHAPError_None;
+}
+
+HAP_RESULT_USE_CHECK
+HAPError HandleLightBulbSaturationRead(
+        HAPAccessoryServerRef* server HAP_UNUSED,
+        const HAPFloatCharacteristicReadRequest* request HAP_UNUSED,
+        float* value,
+        void* _Nullable context HAP_UNUSED) {
+    // HomeKit value is 0-100, FastLED is 0-255
+    *value = (accessoryConfiguration.state.current.led.saturation * 100) / 255;
+    HAPLogInfo(&kHAPLog_Default, "%s: %g", __func__, *value);
+
+    return kHAPError_None;
+}
+
+HAP_RESULT_USE_CHECK
+HAPError HandleLightBulbSaturationWrite(
+        HAPAccessoryServerRef* server,
+        const HAPFloatCharacteristicWriteRequest* request,
+        float value,
+        void* _Nullable context HAP_UNUSED) {
+    HAPLogInfo(&kHAPLog_Default, "%s: %g", __func__, value);
+
+    // HomeKit value is 0-100, FastLED is 0-255
+    value = (value * 255) / 100;
+
+    if (accessoryConfiguration.state.current.led.saturation != value) {
+        accessoryConfiguration.state.current.led.saturation = value;
+
+        fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
+        FastLED.show();
+
+        SaveAccessoryState();
+        HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
+    }
+
+    return kHAPError_None;
+}
+
+HAP_RESULT_USE_CHECK
+HAPError HandleLightBulbBrightnessRead(
+        HAPAccessoryServerRef* server HAP_UNUSED,
+        const HAPIntCharacteristicReadRequest* request HAP_UNUSED,
+        int* value,
+        void* _Nullable context HAP_UNUSED) {
+    // HomeKit value is 0-100, FastLED is 0-255
+    *value = (accessoryConfiguration.state.current.led.saturation * 100) / 255;
+    HAPLogInfo(&kHAPLog_Default, "%s: %d", __func__, *value);
+
+    return kHAPError_None;
+}
+
+HAP_RESULT_USE_CHECK
+HAPError HandleLightBulbBrightnessWrite(
+        HAPAccessoryServerRef* server,
+        const HAPIntCharacteristicWriteRequest* request,
+        int value,
+        void* _Nullable context HAP_UNUSED) {
+    HAPLogInfo(&kHAPLog_Default, "%s: %d", __func__, value);
+
+    // HomeKit value is 0-100, FastLED is 0-255
+    value = (value * 255) / 100;
+
+    if (accessoryConfiguration.state.current.led.value != value) {
+        accessoryConfiguration.state.current.led.value = value;
+
+        fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
+        FastLED.setBrightness(accessoryConfiguration.state.current.led.value);
+        FastLED.show();
+
+        SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
 
@@ -242,7 +384,11 @@ void AppInitialize(
         HAPAccessoryServerOptions* hapAccessoryServerOptions,
         HAPPlatform* hapPlatform,
         HAPAccessoryServerCallbacks* hapAccessoryServerCallbacks) {
-    /*no-op*/
+    FastLED.setMaxPowerInVoltsAndMilliamps(VOLTS, MILLIAMPS);
+    FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+    // TODO: Used saved state instead?
+    fill_solid(leds, NUM_LEDS, CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT));
+    FastLED.show();
 }
 
 void AppDeinitialize() {
