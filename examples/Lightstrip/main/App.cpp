@@ -32,12 +32,19 @@
 #define LED_TYPE    WS2812B
 #define COLOR_ORDER GRB
 
+#define STEP 5 // Granuality to change patterns
+#define FPS  60
+
 #define HUE_DEFAULT        125 // TODO: Use Kconfig.projbuild for these
 #define SATURATION_DEFAULT 204
 #define BRIGHTNESS_DEFAULT 120
 
 #define FASTLED_INTERNAL // Disable "No hardware SPI pins defined.  All SPI
                          // access will default to bitbanged output" message
+
+#include "esp_err.h"
+#include "esp_timer.h"
+
 #include "FastLED.h"
 #include "HAP.h"
 
@@ -66,6 +73,7 @@
  */
 typedef struct {
     bool on;
+    uint8_t brightness; // Saved brightness for on/off
     CHSV led;
 } lightstrip;
 
@@ -75,6 +83,7 @@ typedef struct {
 typedef struct {
     struct {
         lightstrip current;
+        lightstrip target;
     } state;
     HAPAccessoryServerRef* server;
     HAPPlatformKeyValueStoreRef keyValueStore;
@@ -83,6 +92,103 @@ typedef struct {
 static AccessoryConfiguration accessoryConfiguration;
 
 CRGB leds[NUM_LEDS];
+esp_timer_handle_t periodic_timer;
+
+//----------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Attempt to start the timer if it is not already going.
+ */
+void update() {
+    esp_err_t err;
+    err = esp_timer_start_periodic(periodic_timer, 1000000 / FPS);
+    // ESP_ERR_INVALID_STATE if the timer is already running
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(err);
+    }
+}
+
+/**
+ * Smoothly blend towards target
+ */
+void nblendU8TowardU8(uint8_t& current, const uint8_t target) {
+    if (current == target) {
+        return;
+    }
+
+    uint8_t direction = 0;
+
+    if (current < target) {
+        if (target - current <= 180) {
+            direction = 1;
+        } else {
+            direction = -1;
+        }
+    } else {
+        if (current - target <= 180) {
+            direction = -1;
+        } else {
+            direction = 1;
+        }
+    }
+
+    if (current < target) {
+        uint8_t delta = target - current;
+        delta = scale8_video(delta, STEP);
+        current += delta * direction;
+    } else {
+        uint8_t delta = current - target;
+        delta = scale8_video(delta, STEP);
+        current += delta * direction;
+    }
+}
+
+/**
+ * Callback to blend current LEDs towards target LEDs.
+ */
+void periodic_timer_callback(void* arg) {
+    // Adjust to the correct brightness if the lightstrip was turned on/off
+    if (accessoryConfiguration.state.current.on != accessoryConfiguration.state.target.on) {
+        uint8_t current_brightness = accessoryConfiguration.state.current.brightness;
+        uint8_t target_brightness = accessoryConfiguration.state.target.brightness;
+
+        if (accessoryConfiguration.state.target.on) {
+            if (target_brightness >= current_brightness) {
+                if (target_brightness - current_brightness < STEP) {
+                    current_brightness = target_brightness;
+                    accessoryConfiguration.state.current.on = true;
+                } else {
+                    current_brightness += STEP;
+                }
+            }
+        } else {
+            if (current_brightness >= target_brightness) {
+                if (current_brightness - target_brightness < STEP) {
+                    current_brightness = target_brightness;
+                    accessoryConfiguration.state.current.on = false;
+                } else {
+                    current_brightness -= STEP;
+                }
+            }
+        }
+        accessoryConfiguration.state.current.brightness = current_brightness;
+        FastLED.setBrightness(current_brightness);
+    } else {
+        nblendU8TowardU8(accessoryConfiguration.state.current.led.val, accessoryConfiguration.state.target.led.val);
+        FastLED.setBrightness(accessoryConfiguration.state.current.led.val);
+    }
+
+    nblendU8TowardU8(accessoryConfiguration.state.current.led.hue, accessoryConfiguration.state.target.led.hue);
+    nblendU8TowardU8(accessoryConfiguration.state.current.led.sat, accessoryConfiguration.state.target.led.sat);
+
+    fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
+    FastLED.show();
+
+    if (accessoryConfiguration.state.current.led == accessoryConfiguration.state.target.led &&
+        accessoryConfiguration.state.current.on == accessoryConfiguration.state.target.on) {
+        ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+    }
+}
 
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -119,6 +225,9 @@ static void LoadAccessoryState(void) {
 
         // Set defaults
         accessoryConfiguration.state.current.led = CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT);
+        accessoryConfiguration.state.target.led = CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT);
+        accessoryConfiguration.state.current.brightness = BRIGHTNESS_DEFAULT;
+        accessoryConfiguration.state.target.brightness = BRIGHTNESS_DEFAULT;
     }
 }
 
@@ -193,16 +302,16 @@ HAPError HandleLightBulbOnWrite(
         bool value,
         void* _Nullable context HAP_UNUSED) {
     HAPLogInfo(&kHAPLog_Default, "%s: %s", __func__, value ? "true" : "false");
-    if (accessoryConfiguration.state.current.on != value) {
-        accessoryConfiguration.state.current.on = value;
+    if (accessoryConfiguration.state.target.on != value) {
+        accessoryConfiguration.state.target.on = value;
 
         if (value) {
-            FastLED.setBrightness(accessoryConfiguration.state.current.led.value);
+            accessoryConfiguration.state.target.brightness = accessoryConfiguration.state.target.led.value;
         } else {
-            FastLED.setBrightness(0);
+            accessoryConfiguration.state.target.brightness = 0;
         }
-        FastLED.show();
 
+        update();
         SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
@@ -234,12 +343,10 @@ HAPError HandleLightBulbHueWrite(
     // HomeKit value is 0-360, FastLED is 0-255
     value = (value * 255) / 360;
 
-    if (accessoryConfiguration.state.current.led.hue != value) {
-        accessoryConfiguration.state.current.led.hue = value;
+    if (accessoryConfiguration.state.target.led.hue != value) {
+        accessoryConfiguration.state.target.led.hue = value;
 
-        fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
-        FastLED.show();
-
+        update();
         SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
@@ -271,12 +378,10 @@ HAPError HandleLightBulbSaturationWrite(
     // HomeKit value is 0-100, FastLED is 0-255
     value = (value * 255) / 100;
 
-    if (accessoryConfiguration.state.current.led.saturation != value) {
-        accessoryConfiguration.state.current.led.saturation = value;
+    if (accessoryConfiguration.state.target.led.saturation != value) {
+        accessoryConfiguration.state.target.led.saturation = value;
 
-        fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
-        FastLED.show();
-
+        update();
         SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
@@ -308,13 +413,11 @@ HAPError HandleLightBulbBrightnessWrite(
     // HomeKit value is 0-100, FastLED is 0-255
     value = (value * 255) / 100;
 
-    if (accessoryConfiguration.state.current.led.value != value) {
-        accessoryConfiguration.state.current.led.value = value;
+    if (accessoryConfiguration.state.target.led.value != value) {
+        accessoryConfiguration.state.target.led.value = value;
+        accessoryConfiguration.state.target.brightness = value;
 
-        fill_solid(leds, NUM_LEDS, accessoryConfiguration.state.current.led);
-        FastLED.setBrightness(accessoryConfiguration.state.current.led.value);
-        FastLED.show();
-
+        update();
         SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
@@ -389,6 +492,13 @@ void AppInitialize(
     // TODO: Used saved state instead?
     fill_solid(leds, NUM_LEDS, CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT));
     FastLED.show();
+
+    const esp_timer_create_args_t periodic_timer_args = { .callback = &periodic_timer_callback,
+                                                          .arg = NULL,
+                                                          .dispatch_method = ESP_TIMER_TASK,
+                                                          .name = "periodic",
+                                                          .skip_unhandled_events = true };
+    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
 }
 
 void AppDeinitialize() {
