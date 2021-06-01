@@ -44,6 +44,7 @@
 
 #include "esp_err.h"
 #include "esp_timer.h"
+#include <unistd.h>
 
 #include "FastLED.h"
 #include "HAP.h"
@@ -280,6 +281,33 @@ HAPError IdentifyAccessory(
         const HAPAccessoryIdentifyRequest* request HAP_UNUSED,
         void* _Nullable context HAP_UNUSED) {
     HAPLogInfo(&kHAPLog_Default, "%s", __func__);
+
+    uint8_t brightness = accessoryConfiguration.state.current.brightness;
+
+    // Flash the lights to max, then zero, then original to identify
+    while (brightness < UINT8_MAX) {
+        FastLED.setBrightness(brightness);
+        FastLED.show();
+        usleep(1000000 / FPS);
+        brightness += STEP;
+    }
+    brightness -= STEP;
+    while (brightness > 0) {
+        FastLED.setBrightness(brightness);
+        FastLED.show();
+        usleep(1000000 / FPS);
+        brightness -= STEP;
+    }
+    brightness += STEP;
+    while (brightness < accessoryConfiguration.state.current.brightness) {
+        FastLED.setBrightness(brightness);
+        FastLED.show();
+        usleep(1000000 / FPS);
+        brightness += STEP;
+    }
+    FastLED.setBrightness(accessoryConfiguration.state.current.brightness);
+    FastLED.show();
+
     return kHAPError_None;
 }
 
