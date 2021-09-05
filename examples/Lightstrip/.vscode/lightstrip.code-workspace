@@ -1,0 +1,26 @@
+{
+    "folders": [
+        {
+            "path": "../"
+        }
+    ],
+    "extensions": {
+        "recommendations": [
+            "espressif.esp-idf-extension",
+            "ms-vscode.cpptools",
+        ]
+    },
+    "settings": {
+        "files.exclude": {
+            "**/.git": true,
+            "**/.svn": true,
+            "**/.hg": true,
+            "**/CVS": true,
+            "**/.DS_Store": true,
+            "**/Thumbs.db": true,
+            "build": true,
+            "*.bin": true,
+            "sdkconfig*": true,
+        }
+    }
+}
