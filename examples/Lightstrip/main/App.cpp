@@ -105,6 +105,10 @@ esp_timer_handle_t periodic_timer;
 // Dynamically calculated, inversely proprotional
 // to saturation.
 uint8_t max_brightness = MAX_BRIGHTNESS_COLOR;
+
+// Forward declared. TODO: Better way to do this?
+static void SaveAccessoryState(void);
+
 //----------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -198,6 +202,8 @@ void periodic_timer_callback(void* arg) {
     if (accessoryConfiguration.state.current.led == accessoryConfiguration.state.target.led &&
         accessoryConfiguration.state.current.on == accessoryConfiguration.state.target.on) {
         ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+        // After an effect is done, save the state.
+        SaveAccessoryState();
     }
 }
 
@@ -213,7 +219,7 @@ static void LoadAccessoryState(void) {
 
     // Load persistent state if available
     bool found;
-    size_t numBytes;
+    size_t numBytes = 0;
 
     err = HAPPlatformKeyValueStoreGet(
             accessoryConfiguration.keyValueStore,
@@ -231,6 +237,8 @@ static void LoadAccessoryState(void) {
     if (!found || numBytes != sizeof accessoryConfiguration.state) {
         if (found) {
             HAPLogError(&kHAPLog_Default, "Unexpected app state found in key-value store. Resetting to default.");
+        } else {
+            HAPLogError(&kHAPLog_Default, "Could not load app state from key-value store. Resetting to default.");
         }
         HAPRawBufferZero(&accessoryConfiguration.state, sizeof accessoryConfiguration.state);
 
@@ -239,6 +247,10 @@ static void LoadAccessoryState(void) {
         accessoryConfiguration.state.target.led = CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT);
         accessoryConfiguration.state.current.brightness = BRIGHTNESS_DEFAULT;
         accessoryConfiguration.state.target.brightness = BRIGHTNESS_DEFAULT;
+        accessoryConfiguration.state.current.on = true;
+        accessoryConfiguration.state.target.on = true;
+    } else {
+        HAPLogInfo(&kHAPLog_Default, "Loaded app state from key-value store.");
     }
 }
 
@@ -350,7 +362,6 @@ HAPError HandleLightBulbOnWrite(
         }
 
         update();
-        SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
 
@@ -385,7 +396,6 @@ HAPError HandleLightBulbHueWrite(
         accessoryConfiguration.state.target.led.hue = value;
 
         update();
-        SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
 
@@ -423,7 +433,6 @@ HAPError HandleLightBulbSaturationWrite(
         accessoryConfiguration.state.target.led.saturation = value;
 
         update();
-        SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
 
@@ -437,7 +446,7 @@ HAPError HandleLightBulbBrightnessRead(
         int* value,
         void* _Nullable context HAP_UNUSED) {
     // HomeKit value is 0-100, FastLED is 0-255
-    *value = (accessoryConfiguration.state.current.led.saturation * 100) / 255;
+    *value = (accessoryConfiguration.state.current.led.value * 100) / 255;
     HAPLogInfo(&kHAPLog_Default, "%s: %d", __func__, *value);
 
     return kHAPError_None;
@@ -459,7 +468,6 @@ HAPError HandleLightBulbBrightnessWrite(
         accessoryConfiguration.state.target.brightness = value;
 
         update();
-        SaveAccessoryState();
         HAPAccessoryServerRaiseEvent(server, request->characteristic, request->service, request->accessory);
     }
 
@@ -488,9 +496,29 @@ void AppCreate(HAPAccessoryServerRef* server, HAPPlatformKeyValueStoreRef keyVal
     accessoryConfiguration.server = server;
     accessoryConfiguration.keyValueStore = keyValueStore;
     LoadAccessoryState();
+
+    FastLED.setBrightness(max_brightness * accessoryConfiguration.state.current.led.value / UINT8_MAX);
+
+    if (accessoryConfiguration.state.current.on) {
+        fill_solid(
+                leds,
+                NUM_LEDS,
+                CHSV(accessoryConfiguration.state.current.led.hue,
+                     accessoryConfiguration.state.current.led.saturation,
+                     accessoryConfiguration.state.current.led.value));
+        FastLED.show();
+    }
+
+    const esp_timer_create_args_t periodic_timer_args = { .callback = &periodic_timer_callback,
+                                                          .arg = NULL,
+                                                          .dispatch_method = ESP_TIMER_TASK,
+                                                          .name = "periodic",
+                                                          .skip_unhandled_events = true };
+    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
 }
 
 void AppRelease(void) {
+    SaveAccessoryState();
 }
 
 void AppAccessoryServerStart(void) {
@@ -530,16 +558,6 @@ void AppInitialize(
         HAPAccessoryServerCallbacks* hapAccessoryServerCallbacks) {
     set_max_power_in_volts_and_milliamps(VOLTS, MILLIAMPS);
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-    // TODO: Used saved state instead?
-    fill_solid(leds, NUM_LEDS, CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT));
-    FastLED.show();
-
-    const esp_timer_create_args_t periodic_timer_args = { .callback = &periodic_timer_callback,
-                                                          .arg = NULL,
-                                                          .dispatch_method = ESP_TIMER_TASK,
-                                                          .name = "periodic",
-                                                          .skip_unhandled_events = true };
-    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
 }
 
 void AppDeinitialize() {
