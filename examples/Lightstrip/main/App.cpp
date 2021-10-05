@@ -39,6 +39,11 @@
 #define SATURATION_DEFAULT 204
 #define BRIGHTNESS_DEFAULT 120
 
+// White isn't able to get as bright as colors since more
+// LEDs have to be powered
+#define MAX_BRIGHTNESS_COLOR 160
+#define MAX_BRIGHTNESS_WHITE 45
+
 #define FASTLED_INTERNAL // Disable "No hardware SPI pins defined.  All SPI
                          // access will default to bitbanged output" message
 
@@ -51,6 +56,9 @@
 
 #include "App.h"
 #include "DB.h"
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -94,7 +102,9 @@ static AccessoryConfiguration accessoryConfiguration;
 
 CRGB leds[NUM_LEDS];
 esp_timer_handle_t periodic_timer;
-
+// Dynamically calculated, inversely proprotional
+// to saturation.
+uint8_t max_brightness = MAX_BRIGHTNESS_COLOR;
 //----------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -173,10 +183,10 @@ void periodic_timer_callback(void* arg) {
             }
         }
         accessoryConfiguration.state.current.brightness = current_brightness;
-        FastLED.setBrightness(current_brightness);
+        FastLED.setBrightness(max_brightness * current_brightness / UINT8_MAX);
     } else {
         nblendU8TowardU8(accessoryConfiguration.state.current.led.val, accessoryConfiguration.state.target.led.val);
-        FastLED.setBrightness(accessoryConfiguration.state.current.led.val);
+        FastLED.setBrightness(max_brightness * accessoryConfiguration.state.current.led.val / UINT8_MAX);
     }
 
     nblendU8TowardU8(accessoryConfiguration.state.current.led.hue, accessoryConfiguration.state.target.led.hue);
@@ -286,26 +296,26 @@ HAPError IdentifyAccessory(
 
     // Flash the lights to max, then zero, then original to identify
     while (brightness < UINT8_MAX) {
-        FastLED.setBrightness(brightness);
+        FastLED.setBrightness(max_brightness * brightness / UINT8_MAX);
         FastLED.show();
         usleep(1000000 / FPS);
         brightness += STEP;
     }
     brightness -= STEP;
     while (brightness > 0) {
-        FastLED.setBrightness(brightness);
+        FastLED.setBrightness(max_brightness * brightness / UINT8_MAX);
         FastLED.show();
         usleep(1000000 / FPS);
         brightness -= STEP;
     }
     brightness += STEP;
     while (brightness < accessoryConfiguration.state.current.brightness) {
-        FastLED.setBrightness(brightness);
+        FastLED.setBrightness(max_brightness * brightness / UINT8_MAX);
         FastLED.show();
         usleep(1000000 / FPS);
         brightness += STEP;
     }
-    FastLED.setBrightness(accessoryConfiguration.state.current.brightness);
+    FastLED.setBrightness(max_brightness * accessoryConfiguration.state.current.brightness / UINT8_MAX);
     FastLED.show();
 
     return kHAPError_None;
@@ -405,6 +415,9 @@ HAPError HandleLightBulbSaturationWrite(
 
     // HomeKit value is 0-100, FastLED is 0-255
     value = (value * 255) / 100;
+
+    // Recalculate the maximum brightness based on the current saturation value
+    max_brightness = MAX_BRIGHTNESS_WHITE + (value / 255) * (MAX_BRIGHTNESS_COLOR - MAX_BRIGHTNESS_WHITE);
 
     if (accessoryConfiguration.state.target.led.saturation != value) {
         accessoryConfiguration.state.target.led.saturation = value;
@@ -515,7 +528,7 @@ void AppInitialize(
         HAPAccessoryServerOptions* hapAccessoryServerOptions,
         HAPPlatform* hapPlatform,
         HAPAccessoryServerCallbacks* hapAccessoryServerCallbacks) {
-    FastLED.setMaxPowerInVoltsAndMilliamps(VOLTS, MILLIAMPS);
+    set_max_power_in_volts_and_milliamps(VOLTS, MILLIAMPS);
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
     // TODO: Used saved state instead?
     fill_solid(leds, NUM_LEDS, CHSV(HUE_DEFAULT, SATURATION_DEFAULT, BRIGHTNESS_DEFAULT));
